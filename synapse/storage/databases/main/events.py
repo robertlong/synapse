@@ -16,7 +16,6 @@
 import itertools
 import logging
 from collections import OrderedDict, namedtuple
-from synapse.logging.opentracing import start_active_span
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -38,6 +37,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.crypto.event_signing import compute_event_reference_hash
 from synapse.events import EventBase  # noqa: F401
 from synapse.events.snapshot import EventContext  # noqa: F401
+from synapse.logging.opentracing import start_active_span
 from synapse.logging.utils import log_function
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import DatabasePool, LoggingTransaction
@@ -988,12 +988,9 @@ class PersistEventsStore:
                 sql = """
                     INSERT INTO current_state_delta_stream
                     (stream_id, instance_name, room_id, type, state_key, event_id, prev_event_id)
-                    SELECT ?, ?, ?, ?, ?, ?, (
-                        SELECT event_id FROM current_state_events
-                        WHERE room_id = ? AND type = ? AND state_key = ?
-                    )
+                    VALUES ?
                 """
-                txn.execute_batch(
+                txn.execute_values(
                     sql,
                     (
                         (
@@ -1009,30 +1006,38 @@ class PersistEventsStore:
                         )
                         for etype, state_key in itertools.chain(to_delete, to_insert)
                     ),
+                    template="(%s, %s, %s, %s, %s, %s, (SELECT event_id FROM current_state_events WHERE room_id = %s AND type = %s AND state_key = %s))",
+                    fetch=False,
                 )
                 # Now we actually update the current_state_events table
 
-                txn.execute_batch(
-                    "DELETE FROM current_state_events"
-                    " WHERE room_id = ? AND type = ? AND state_key = ?",
+                txn.execute_values(
+                    """
+                        DELETE FROM current_state_events AS c
+                        USING (VALUES ?) AS e(room_id, type, state_key)
+                        WHERE c.room_id = e.room_id AND c.type = e.type AND c.state_key = e.state_key
+                    """,
                     (
                         (room_id, etype, state_key)
                         for etype, state_key in itertools.chain(to_delete, to_insert)
                     ),
+                    fetch=False,
                 )
 
                 # We include the membership in the current state table, hence we do
                 # a lookup when we insert. This assumes that all events have already
                 # been inserted into room_memberships.
-                txn.execute_batch(
+                txn.execute_values(
                     """INSERT INTO current_state_events
                         (room_id, type, state_key, event_id, membership)
-                    VALUES (?, ?, ?, ?, (SELECT membership FROM room_memberships WHERE event_id = ?))
+                    VALUES ?
                     """,
                     [
                         (room_id, key[0], key[1], ev_id, ev_id)
                         for key, ev_id in to_insert.items()
                     ],
+                    fetch=False,
+                    template="(%s, %s, %s, %s, (SELECT membership FROM room_memberships WHERE event_id = %s))",
                 )
 
             # We now update `local_current_membership`. We do this regardless
@@ -1044,27 +1049,33 @@ class PersistEventsStore:
             # we have no record of the fact the user *was* a member of the
             # room but got, say, state reset out of it.
             if to_delete or to_insert:
-                txn.execute_batch(
-                    "DELETE FROM local_current_membership"
-                    " WHERE room_id = ? AND user_id = ?",
+                txn.execute_values(
+                    """
+                        DELETE FROM local_current_membership AS l
+                        USING (VALUES ?) AS e(room_id, user_id)
+                        WHERE l.room_id = e.room_id AND l.user_id = e.user_id
+                    """,
                     (
                         (room_id, state_key)
                         for etype, state_key in itertools.chain(to_delete, to_insert)
                         if etype == EventTypes.Member and self.is_mine_id(state_key)
                     ),
+                    fetch=False,
                 )
 
             if to_insert:
-                txn.execute_batch(
+                txn.execute_values(
                     """INSERT INTO local_current_membership
                         (room_id, user_id, event_id, membership)
-                    VALUES (?, ?, ?, (SELECT membership FROM room_memberships WHERE event_id = ?))
+                    VALUES ?
                     """,
                     [
                         (room_id, key[1], ev_id, ev_id)
                         for key, ev_id in to_insert.items()
                         if key[0] == EventTypes.Member and self.is_mine_id(key[1])
                     ],
+                    fetch=False,
+                    template="(%s, %s, %s, (SELECT membership FROM room_memberships WHERE event_id = %s))",
                 )
 
             txn.call_after(

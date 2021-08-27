@@ -280,7 +280,9 @@ class LoggingTransaction:
         else:
             self.executemany(sql, args)
 
-    def execute_values(self, sql: str, *args: Any, fetch: bool = True) -> List[Tuple]:
+    def execute_values(
+        self, sql: str, *args: Any, template: Optional[str] = None, fetch: bool = True
+    ) -> List[Tuple]:
         """Corresponds to psycopg2.extras.execute_values. Only available when
         using postgres.
 
@@ -291,7 +293,9 @@ class LoggingTransaction:
         from psycopg2.extras import execute_values  # type: ignore
 
         return self._do_execute(
-            lambda *x: execute_values(self.txn, *x, fetch=fetch), sql, *args
+            lambda *x: execute_values(self.txn, *x, template=template, fetch=fetch),
+            sql,
+            *args,
         )
 
     def execute(self, sql: str, *args: Any) -> None:
