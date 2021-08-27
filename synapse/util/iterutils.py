@@ -82,14 +82,13 @@ def sorted_topologically(
         reverse_graph.setdefault(node, set())
 
     zero_degree = [node for node, degree in degree_map.items() if degree == 0]
-    heapq.heapify(zero_degree)
 
     while zero_degree:
-        node = heapq.heappop(zero_degree)
+        node = zero_degree.pop()
         yield node
 
         for edge in reverse_graph.get(node, []):
             if edge in degree_map:
                 degree_map[edge] -= 1
                 if degree_map[edge] == 0:
-                    heapq.heappush(zero_degree, edge)
+                    zero_degree.append(edge)

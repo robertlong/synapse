@@ -411,9 +411,10 @@ class EventsPersistenceStorage:
             if not events_and_contexts:
                 return replaced_events
 
+        BATCH_SIZE = 5000000
         chunks = [
-            events_and_contexts[x : x + 100]
-            for x in range(0, len(events_and_contexts), 100)
+            events_and_contexts[x : x + BATCH_SIZE]
+            for x in range(0, len(events_and_contexts), BATCH_SIZE)
         ]
 
         for chunk in chunks:

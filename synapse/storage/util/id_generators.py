@@ -17,6 +17,7 @@ import threading
 from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from sortedcontainers import SortedSet
 
 import attr
 
@@ -240,7 +241,7 @@ class MultiWriterIdGenerator:
 
         # Set of local IDs that we're still processing. The current position
         # should be less than the minimum of this set (if not empty).
-        self._unfinished_ids: Set[int] = set()
+        self._unfinished_ids: SortedSet[int] = SortedSet()
 
         # Set of local IDs that we've processed that are larger than the current
         # position, due to there being smaller unpersisted IDs.
@@ -473,7 +474,7 @@ class MultiWriterIdGenerator:
 
                 finished = set()
 
-                min_unfinshed = min(self._unfinished_ids)
+                min_unfinshed = self._unfinished_ids[0]
                 for s in self._finished_ids:
                     if s < min_unfinshed:
                         if new_cur is None or new_cur < s:
